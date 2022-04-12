@@ -6,7 +6,7 @@
  2. R Markdown walkthrough _(mi_sca_workshop.Rmd)_.
  3. Artificially synthesized data for the walkthrough _(crea_data.csv)_.
 
-*R session info:*
+*R session info:*  
 R version 4.1.0 (2021-05-18)  
 Platform: x86_64-apple-darwin17.0 (64-bit)  
 Running under: macOS Big Sur 11.6  
