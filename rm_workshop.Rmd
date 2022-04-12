@@ -1,0 +1,222 @@
+---
+title: "Speccurves_multipleimp"
+author: "Maitri Jain"
+date: "3/21/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load libraries
+```{r}
+library(tidyverse) # working with datasets
+library(specr) # specification curves
+library(mice) # multiple imputation
+library(semTools) # missing data information
+```
+
+# Check dataset
+```{r}
+df = read.csv("crea_data.csv")
+head(df) # see how much missing
+
+# Correcting variable types
+df = df %>% mutate(
+  Gender = as.factor(Gender),
+  Race = as.factor(Race),
+  Ethnicity =  as.factor(Ethnicity),
+)
+```
+
+# Check patterns of missing data
+```{r}
+md.pattern(df) # what values are missing
+
+mean(is.na(df$PBS)) # how much is missing
+mean(is.na(df$WIAT_N))
+```
+# Initial imputations
+```{r}
+
+## Dry run of imputations to see how it works
+
+ini = mice(df, seed = 329, print = T)
+
+plot(ini)
+```
+
+# Check which variables are related to missingness
+```{r}
+
+## Example for how to check for variables related to missigness. For the sake of today's workshop, we will include all variables in the imputation model (better to err on the side of more!). 
+
+df = df %>% mutate (pbs_missing = is.na(df$PBS)) # create variable which specifies missingness
+
+t.test(df$Age ~ df$pbs_missing) # for continuous predictors
+
+summary(glm(data = df, formula = pbs_missing ~ Gender, family = binomial(link='logit'))) # for categorical predictors
+```
+
+# Change the variables used to predict
+```{r}
+pred = ini$predictorMatrix # which variables predicted what - can be useful when you don't want certain variables to be predictor. mice doesn't allow you to remove a variable from being predicted unless you also want to remove it from being predictor (will  have to create your own prediction matrix for that)
+## 1 represents that column variable was used to predict the row variable
+
+pred[ , c('Attachment_security_4')] <- 0 # remove from predicting all variables
+pred['PBS', 'Age'] <- 0  # remove specific predictors for specific outcomes
+pred
+```
+
+# How many imputed data sets
+```{r}
+# fraction of missing information
+fmi(df, method = "saturated", group = NULL, ords = NULL,
+  varnames = NULL, exclude = NULL, fewImps = FALSE)
+
+# based on percentage of missing data
+mean(is.na(df$PBS))
+```
+
+# Conduct imputations with new prediction matrix
+```{r}
+imp_mypred <- mice(df, predictorMatrix = pred, seed = 329, print=F, maxit = 10, m = 10) # using our own prediction matrix -- change maxit and mice to increase number of iterations and number of imputed data sets
+
+imp_quickpred = mice(df, pred=quickpred(df, mincor=.3), seed = 329, print=F) # setting criteria for which variables should  be used to predict
+
+plot(imp_mypred) # check convergence of data sets - want them to be free of any trends in later iterations
+stripplot(imp_mypred, CBCL~.imp, pch = 20, cex = 2) # check reasonability of imputed values
+
+summary(with(imp_mypred, mean(PBS)))  ## mean from first imputed data set
+summary(mean(df$PBS, na.rm = TRUE)) ## mean from non-imputed dataset
+```
+
+# Using imputed data set for specification curve analysis
+```{r}
+# First - save the imputed data so that you don't have to do it again and again
+save(imp_mypred, file = "impdata.rda")
+
+# Load the data everytime you want to  use it
+load("impdata.rda")
+
+# For specification  curves - we will use the long form of the data
+c.long = complete(imp_mypred, 'long')
+c.broad = complete(imp_mypred, 'broad')
+```
+
+# Specification curves on non-imputed data set
+```{r}
+spec_nonimp = run_specs(df = df,
+                    x = c("Attachment_security_8", "Attachment_security_4"),
+                    y = c("CBCL"),
+                    controls = c("Age", "Gender", "Race", "Ethnicity"),
+                    model = c("lm"),
+                    all.comb = TRUE)
+plot_specs(spec_nonimp)
+```
+
+# Specification curves with imputations
+
+## Separate spec curve for each imputed data set
+```{r}
+
+# doing multiple times (not recommended)
+spec_imp_1 = c.long %>% filter(.imp == 1)
+specs_1 = run_specs(df = spec_imp_1,
+                    x = c("Attachment_security_8", "Attachment_security_4"),
+                    y = c("CBCL"),
+                    controls = c("Age", "Gender", "Race", "Ethnicity"),
+                    model = c("lm"),
+                    all.comb = TRUE)
+  
+# running specification curve
+spec_imp <- c.long %>% 
+  group_by(.imp) %>% # group data based on which imputed data set is
+  nest() %>% # creates data frames within data frames
+  mutate(specs = purrr::map(data, ~run_specs(df = .,
+                    x = c("Attachment_security_8", "Attachment_security_4"),
+                    y = c("CBCL"),
+                    controls = c("Age", "Gender", "Race", "Ethnicity"),
+                    model = c("lm"),
+                    all.comb = TRUE))) # create a separate specification curve for each imputed data set
+
+```
+
+## Combining results across imputed data sets
+```{r}
+
+# unnest specification curves
+
+unnested_specs <- spec_imp %>% unnest(specs) # 'takes out' the specifications from the dataframe
+
+# Function for pooling standard deviation across the imputations
+
+pooled_sd = function(means, sds){
+  n = length(means)
+  variance_within = (1/n)*sum(sds^2)
+  variance_between = var(means)
+  variance_total = variance_within + variance_between + (variance_between/n)
+  return(sqrt(variance_total))
+}
+
+#### grouping and getting mean estimate (rubin's rules)
+
+mean_estimate <- unnested_specs %>% 
+  group_by(controls, y, x, model, subsets) %>% 
+  summarize(std.error = pooled_sd(means = estimate, 
+                                  sds = std.error),
+            estimate = mean(estimate)
+  ) %>% 
+  mutate(conf.low = estimate-2*std.error, 
+         conf.high = estimate+2*std.error, 
+         statistic = estimate/std.error) %>% 
+  ungroup()
+
+# visualize 
+plot_specs(mean_estimate) 
+```
+
+## CBCL ~ crEAs
+
+```{r}
+## running specification curve
+spec_imp_crea <- c.long %>% 
+  group_by(.imp) %>% # group data based on which imputed data set is
+  nest() %>% # creates data frames within data frames
+  mutate(specs = purrr::map(data, ~run_specs(df = .,
+                    x = c("crEA"),
+                    y = c("CBCL"),
+                    controls = c("Age", "Gender", "Race", "Ethnicity"),
+                    model = c("lm"),
+                    all.comb = TRUE))) # create a separate specification curve for each imputed data set
+
+#### unnest specification curves
+
+unnested_specs_crea <- spec_imp_crea %>% unnest(specs) # 'takes out' the specifications from the dataframe
+
+#### grouping and getting mean estimate (rubin's rules)
+
+mean_estimate_crea <- unnested_specs_crea %>% 
+  group_by(controls, y, x, model, subsets) %>% 
+  summarize(std.error = pooled_sd(means = estimate, 
+                                  sds = std.error),
+            estimate = mean(estimate)
+  ) %>% 
+  mutate(conf.low = estimate-2*std.error, 
+         conf.high = estimate+2*std.error, 
+         statistic = estimate/std.error) %>% 
+  ungroup()
+
+# visualize 
+plot_specs(mean_estimate_crea) 
+```
+
+
+
+put R version  and  R packages, R machine you used.
+
+
+
+
+
