@@ -1,28 +1,32 @@
 ---
-title: "Speccurves_multipleimp"
-author: "Maitri Jain"
-date: "3/21/2022"
-output: html_document
+title: "Working with Missing Data"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-# Load libraries
-```{r}
+**This tutorial uses fake data developed through the synthpop package in R.**  
+
+# Setting up R environment
+```{r, warning=FALSE, results='hide', message=FALSE}
 library(tidyverse) # working with datasets
 library(specr) # specification curves
 library(mice) # multiple imputation
 library(semTools) # missing data information
 ```
 
-# Check dataset
+# Loading and prepping data
 ```{r}
-df = read.csv("crea_data.csv")
-head(df) # see how much missing
+df = read.csv("crea_data.csv") # loading dataset
+head(df) # checking data
 
-# Correcting variable types
+# correcting variable types (making sure categorical variables are coded as factors)
 df = df %>% mutate(
   Gender = as.factor(Gender),
   Race = as.factor(Race),
@@ -30,66 +34,67 @@ df = df %>% mutate(
 )
 ```
 
-# Check patterns of missing data
+# Checking pattern of missing data
 ```{r}
-md.pattern(df) # understanding the pattern of missing data for smaller data sets
-
-mean(is.na(df$PBS)) # how much is missing
+md.pattern(df, rotate.names = TRUE) # pattern of missing data
+mean(is.na(df$PBS)) # checking percentage of missing data
 mean(is.na(df$WIAT_N))
 ```
-# Initial imputations
-```{r}
 
-## Dry run of imputations to see how it works
+# First initial imputations
+```{r, warning=FALSE}
+ini = mice(df, seed = 329, print = F, m = 5) # dry run of imputations to see how it works
 
-ini = mice(df, seed = 329, print = T)
-
-plot(ini)
+summary(ini) # summary of imputed object
 ```
 
-# Check which variables are related to missingness - Identifying auxiliary variables
+# Conducting linear regression on imputed models using MICE
+```{r}
+fit <- with(ini, lm(CBCL ~ crEA)) # linear regression on each imputed dataset separately
+summary(pool(fit)) # combining information from multiple datasets
+```
+
+# Identifying auxiliary variables
 ```{r}
 
 ## Example for how to check for variables related to missigness. For the sake of today's workshop, we will include all variables in the imputation model (better to err on the side of more!). 
 
 df = df %>% mutate (pbs_missing = is.na(df$PBS)) # create variable which specifies missingness
 
-t.test(df$Age ~ df$pbs_missing) # for continuous predictors
+t.test(df$Age ~ df$pbs_missing) # identifying continuous variables related to missingness
 
-summary(glm(data = df, formula = pbs_missing ~ Gender, family = binomial(link='logit'))) # for categorical predictors
+summary(glm(data = df, formula = pbs_missing ~ Gender, family = binomial(link='logit')))  # identifying categorical variables related to missingness
 ```
 
-# Change the variables used to predict
+# Changing the prediction matrix
 ```{r}
-pred = ini$predictorMatrix # which variables predicted what - can be useful when you don't want certain variables to be predictor. mice doesn't allow you to remove a variable from being predicted unless you also want to remove it from being predictor (will  have to create your own prediction matrix for that)
+pred = ini$predictorMatrix # which variables predicted what - can be useful when you don't want certain variables to be predictors. MICE doesn't allow you to remove a variable from being predicted unless you also want to remove it from being a predictor (you will have to create your own prediction matrix for that)
 ## 1 represents that column variable was used to predict the row variable
 
 pred[ , c('Attachment_security_4')] <- 0 # remove from predicting all variables
 pred['PBS', 'Age'] <- 0  # remove specific predictors for specific outcomes
 ```
 
-# How many imputed data sets
+# Calculating number of imputed datasets required
 ```{r}
-# fraction of missing information
-fmi(df, method = "saturated", group = NULL, ords = NULL,
-  varnames = NULL, exclude = NULL, fewImps = FALSE)
-
-# based on percentage of missing data
+# percentage of missing data: minimum number of datasets to impute
 mean(is.na(df$PBS))
 
-0.259/27
+# fraction of missing information (FMI/m should  be less than 0.01)
+fmi(df, method = "saturated", group = NULL, ords = NULL,
+  varnames = NULL, exclude = NULL, fewImps = FALSE)
 ```
 
-# Conduct imputations with new prediction matrix
-```{r}
-imp_mypred <- mice(df, predictorMatrix = pred, seed = 329, print=F, maxit = 10, m = 10) # using our own prediction matrix -- change maxit and mice to increase number of iterations and number of imputed data sets
+# Conducting new imputations 
+```{r, warning=FALSE}
+imp_mypred <- mice(df, predictorMatrix = pred, seed = 329, print=F, maxit = 10, m = 10) # using our own prediction matrix -- change maxit and mice to increase number of iterations and number of imputed data sets respectively
 
-imp_quickpred = mice(df, pred=quickpred(df, mincor=.3), seed = 329, print=F) # setting criteria for which variables should  be used to predict
+imp_quickpred = mice(df, pred=quickpred(df, mincor=.3), seed = 329, print=F) # the second option is to use pre-set criteria for which variables shouldbe used to predict
 
 plot(imp_mypred) # check convergence of data sets - want them to be free of any trends in later iterations
 stripplot(imp_mypred, CBCL~.imp, pch = 20, cex = 2) # check reasonability of imputed values
 
-summary(with(imp_mypred, mean(PBS)))  ## mean from first imputed data set
+summary(with(imp_mypred, mean(PBS)))  ## mean from  imputed data set
 summary(mean(df$PBS, na.rm = TRUE)) ## mean from non-imputed dataset
 ```
 
@@ -102,37 +107,30 @@ save(imp_mypred, file = "impdata.rda")
 load("impdata.rda")
 
 # For specification  curves - we will use the long form of the data
-c.long = complete(imp_mypred, 'long')
-c.broad = complete(imp_mypred, 'broad')
+c.long = complete(imp_mypred, 'long') # convert imputed data into long form dataframe
+c.broad = complete(imp_mypred, 'broad') # convert imputed data into broad form dataframe
 ```
 
-# Specification curves on non-imputed data set
+## Specification curves on non-imputed data set
 ```{r}
 spec_nonimp = run_specs(df = df,
-                    x = c("Attachment_security_8", "Attachment_security_4"),
+                    x = c("crEA"),
                     y = c("CBCL"),
                     controls = c("Age", "Gender", "Race", "Ethnicity"),
                     model = c("lm"),
                     all.comb = TRUE)
-plot_specs(spec_nonimp)
-```
-# Linear regression on imputed models using MICE
-```{r}
-fit <- with(imp_mypred, lm(CBCL ~ crEA))
-summary(pool(fit))
+plot_specs(spec_nonimp) # visualize
 ```
 
-# Specification curves with imputations
+## Specification curves with imputations
 
-## Separate spec curve for each imputed data set
+### Separate spec curve for each imputed data set
 ```{r}
   
 # running specification curve
 spec_imp <- c.long %>% 
   group_by(.imp) %>% # group data based on which imputed data set is
-  nest()
-
-spec_imp = spec_imp %>% # creates data frames within data frames
+  nest() %>% # creates data frames within data frames
   mutate(specs = purrr::map(data, ~run_specs(df = .,
                     x = c("crEA"),
                     y = c("CBCL"),
@@ -142,7 +140,7 @@ spec_imp = spec_imp %>% # creates data frames within data frames
 
 ```
 
-## Combining results across imputed data sets
+### Combining results across imputed data sets
 ```{r}
 
 # unnest specification curves
@@ -172,11 +170,10 @@ mean_estimate <- unnested_specs %>%
          statistic = estimate/std.error) %>% 
   ungroup()
 
-# visualize 
-plot_specs(mean_estimate) 
+plot_specs(mean_estimate) # visualize 
 ```
 
-## CBCL ~ Attachment security
+### Another example: CBCL ~ Attachment security
 
 ```{r}
 ## running specification curve
@@ -207,8 +204,7 @@ mean_estimate_attach <- unnested_specs_attach %>%
          statistic = estimate/std.error) %>% 
   ungroup()
 
-# visualize 
-plot_specs(mean_estimate_attach) 
+plot_specs(mean_estimate_attach) # visualize 
 ```
 
 

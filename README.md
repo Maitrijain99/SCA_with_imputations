@@ -1,17 +1,19 @@
 # Specification Curve Analysis with Multiply Imputed Dataset
  Research methods workshop on how to conduct specification curve analysis with multiply imputed data.  
  
- *This repository contains the following material from the research methods workshop held on 04/14/2022 at Columbia University:*
- 1. Powerpoint presentation _(mi_sca_workshop.pptx)_.
- 2. R Markdown walkthrough _(mi_sca_workshop.Rmd)_.
- 3. Artificially synthesized data for the walkthrough _(crea_data.csv)_.
+ **This repository contains the following material from the research methods workshop held on 04/14/2022 at Columbia University:**
+ 1. Slides from workshop _(mi_sca_workshop.pptx)_.
+ 2. Artificially synthesized data _(crea_data.csv)_.
+ 3. R Markdown walkthrough _(mi_sca_workshop.Rmd)_.
+ 4. HTML walkthrough  _(mi_sca_workshop.html)_.
+ 
 
-*R session info:*  
+**R session info:**  
 R version 4.1.0 (2021-05-18)  
 Platform: x86_64-apple-darwin17.0 (64-bit)  
 Running under: macOS Big Sur 11.6  
 
-*Attached base packages:*
+**Attached base packages:**
 1. stats
 2. graphics
 3. grDevices
@@ -20,7 +22,7 @@ Running under: macOS Big Sur 11.6
 6. methods
 7. base     
 
-*Other attached packages:*
+**Other attached packages:**
 1. semTools_0.5-5
 2. lavaan_0.6-9
 3. mice_3.13.0
