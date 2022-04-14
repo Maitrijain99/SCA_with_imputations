@@ -11,7 +11,7 @@ output:
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-**This tutorial uses fake data developed through the synthpop package in R.**  
+**This tutorial uses fake data simulated using the synthpop package in R.**  
 
 # Setting up R environment
 ```{r, warning=FALSE, results='hide', message=FALSE}
@@ -23,7 +23,7 @@ library(semTools) # missing data information
 
 # Loading and prepping data
 ```{r}
-df = read.csv("crea_data.csv") # loading dataset
+df = read.csv("fake_data.csv") # loading dataset
 head(df) # checking data
 
 # correcting variable types (making sure categorical variables are coded as factors)
@@ -31,14 +31,15 @@ df = df %>% mutate(
   Gender = as.factor(Gender),
   Race = as.factor(Race),
   Ethnicity =  as.factor(Ethnicity),
+  Subject = as.character(Subject)
 )
 ```
 
 # Checking pattern of missing data
 ```{r}
 md.pattern(df, rotate.names = TRUE) # pattern of missing data
-mean(is.na(df$PBS)) # checking percentage of missing data
-mean(is.na(df$WIAT_N))
+mean(is.na(df$Rel_parent)) # checking percentage of missing data
+mean(is.na(df$Aggression))
 ```
 
 # First initial imputations
@@ -50,7 +51,7 @@ summary(ini) # summary of imputed object
 
 # Conducting linear regression on imputed models using MICE
 ```{r}
-fit <- with(ini, lm(CBCL ~ crEA)) # linear regression on each imputed dataset separately
+fit <- with(ini, lm(Rel_child ~ Trauma)) # linear regression on each imputed dataset separately
 summary(pool(fit)) # combining information from multiple datasets
 ```
 
@@ -59,11 +60,11 @@ summary(pool(fit)) # combining information from multiple datasets
 
 ## Example for how to check for variables related to missigness. For the sake of today's workshop, we will include all variables in the imputation model (better to err on the side of more!). 
 
-df = df %>% mutate (pbs_missing = is.na(df$PBS)) # create variable which specifies missingness
+df = df %>% mutate (Parent_missing = is.na(df$Rel_parent)) # create variable which specifies missingness
 
-t.test(df$Age ~ df$pbs_missing) # identifying continuous variables related to missingness
+t.test(df$Age ~ df$Parent_missing) # identifying continuous variables related to missingness
 
-summary(glm(data = df, formula = pbs_missing ~ Gender, family = binomial(link='logit')))  # identifying categorical variables related to missingness
+summary(glm(data = df, formula = Parent_missing ~ Gender, family = binomial(link='logit')))  # identifying categorical variables related to missingness
 ```
 
 # Changing the prediction matrix
@@ -71,14 +72,13 @@ summary(glm(data = df, formula = pbs_missing ~ Gender, family = binomial(link='l
 pred = ini$predictorMatrix # which variables predicted what - can be useful when you don't want certain variables to be predictors. MICE doesn't allow you to remove a variable from being predicted unless you also want to remove it from being a predictor (you will have to create your own prediction matrix for that)
 ## 1 represents that column variable was used to predict the row variable
 
-pred[ , c('Attachment_security_4')] <- 0 # remove from predicting all variables
-pred['PBS', 'Age'] <- 0  # remove specific predictors for specific outcomes
+pred['Rel_parent', 'Age'] <- 0  # remove specific predictors for specific outcomes
 ```
 
 # Calculating number of imputed datasets required
 ```{r}
 # percentage of missing data: minimum number of datasets to impute
-mean(is.na(df$PBS))
+mean(is.na(df$Rel_parent))
 
 # fraction of missing information (FMI/m should  be less than 0.01)
 fmi(df, method = "saturated", group = NULL, ords = NULL,
@@ -92,10 +92,10 @@ imp_mypred <- mice(df, predictorMatrix = pred, seed = 329, print=F, maxit = 10, 
 imp_quickpred = mice(df, pred=quickpred(df, mincor=.3), seed = 329, print=F) # the second option is to use pre-set criteria for which variables shouldbe used to predict
 
 plot(imp_mypred) # check convergence of data sets - want them to be free of any trends in later iterations
-stripplot(imp_mypred, CBCL~.imp, pch = 20, cex = 2) # check reasonability of imputed values
+stripplot(imp_mypred, Aggression~.imp, pch = 20, cex = 2) # check reasonability of imputed values
 
-summary(with(imp_mypred, mean(PBS)))  ## mean from  imputed data set
-summary(mean(df$PBS, na.rm = TRUE)) ## mean from non-imputed dataset
+summary(with(imp_mypred, mean(Rel_parent)))  ## mean from  imputed data set
+summary(mean(df$Rel_parent, na.rm = TRUE)) ## mean from non-imputed dataset
 ```
 
 # Using imputed data set for specification curve analysis
@@ -114,8 +114,8 @@ c.broad = complete(imp_mypred, 'broad') # convert imputed data into broad form d
 ## Specification curves on non-imputed data set
 ```{r}
 spec_nonimp = run_specs(df = df,
-                    x = c("crEA"),
-                    y = c("CBCL"),
+                    x = c("Trauma"),
+                    y = c("Rel_child"),
                     controls = c("Age", "Gender", "Race", "Ethnicity"),
                     model = c("lm"),
                     all.comb = TRUE)
@@ -132,8 +132,8 @@ spec_imp <- c.long %>%
   group_by(.imp) %>% # group data based on which imputed data set is
   nest() %>% # creates data frames within data frames
   mutate(specs = purrr::map(data, ~run_specs(df = .,
-                    x = c("crEA"),
-                    y = c("CBCL"),
+                    x = c("Trauma"),
+                    y = c("Rel_child"),
                     controls = c("Age", "Gender", "Race", "Ethnicity"),
                     model = c("lm"),
                     all.comb = TRUE))) # create a separate specification curve for each imputed data set
@@ -181,8 +181,8 @@ spec_imp_attach <- c.long %>%
   group_by(.imp) %>% # group data based on which imputed data set is
   nest() %>% # creates data frames within data frames
   mutate(specs = purrr::map(data, ~run_specs(df = .,
-                    x = c("Attachment_security_4", "Attachment_security_8"),
-                    y = c("CBCL"),
+                    x = c("Rel_child", "Rel_parent"),
+                    y = c("Depression"),
                     controls = c("Age", "Gender", "Race", "Ethnicity"),
                     model = c("lm"),
                     all.comb = TRUE))) # create a separate specification curve for each imputed data set
